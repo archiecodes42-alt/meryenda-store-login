@@ -3,7 +3,7 @@ services:
     name: meryenda-store-pos
     env: node
     plan: starter
-    buildCommand: npm install
+    buildCommand: yarn install
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
@@ -21,4 +21,3 @@ services:
         scope: secret
     repo: https://github.com/archiecodes42-alt/meryenda-store-login
     branch: main
-    rootDir: ./
