@@ -1,0 +1,1 @@
+# POS-nologin-MeryendaStore2
