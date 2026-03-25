@@ -4,17 +4,20 @@ services:
     env: node
     plan: starter
     buildCommand: npm install
-    startCommand: npm start
+    startCommand: node server.js
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 3000
       - key: JWT_SECRET
+        value: meryenda-store-jwt-secret-key
         scope: secret
       - key: SESSION_SECRET
+        value: meryenda-store-session-secret
         scope: secret
       - key: MONGODB_URI
+        value: mongodb+srv://archie:ldf0Kf6Mk4mfLy9d@cluster0.zxyte8i.mongodb.net/meryenda_store?appName=Cluster0
         scope: secret
     repo: https://github.com/archiecodes42-alt/meryenda-store-login
     branch: main
