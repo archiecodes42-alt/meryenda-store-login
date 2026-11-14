@@ -16,11 +16,16 @@ dotenv.config();
 
 // Try to load bcrypt first (for desktop), fallback to bcryptjs (for mobile)
 let bcrypt;
+let bcryptType;
 try {
-    bcrypt = await import('bcrypt');
+    const mod = await import('bcrypt');
+    bcrypt = mod.default ?? mod;
+    bcryptType = 'bcrypt';
     console.log('✅ Using bcrypt (native) for better performance');
 } catch (error) {
-    bcrypt = await import('bcryptjs');
+    const mod = await import('bcryptjs');
+    bcrypt = mod.default ?? mod;
+    bcryptType = 'bcryptjs';
     console.log('✅ Using bcryptjs (pure JS) for compatibility');
 }
 
@@ -31,6 +36,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'meryenda-store-jwt-secret-key';
+const MONGODB_URI = process.env.MONGODB_URI;
 
 // Create directories if they don't exist
 const viewsDir = path.join(__dirname, 'views');
@@ -55,8 +61,8 @@ app.use(helmet({
 
 // CORS configuration
 app.use(cors({
-    origin: process.env.NODE_ENV === 'production' 
-        ? process.env.FRONTEND_URL || 'http://localhost:3000' 
+    origin: process.env.NODE_ENV === 'production'
+        ? process.env.FRONTEND_URL || 'http://localhost:3000'
         : '*',
     credentials: true,
     optionsSuccessStatus: 200
@@ -76,14 +82,14 @@ app.use('/css', express.static(cssDir));
 app.use('/js', express.static(jsDir));
 app.use('/images', express.static(imagesDir));
 
-// Session configuration - UPDATED to 365 days
+// Session configuration - 365 days
 app.use(session({
     secret: process.env.SESSION_SECRET || 'meryenda-store-session-secret',
     resave: false,
     saveUninitialized: false,
-    cookie: { 
+    cookie: {
         secure: process.env.NODE_ENV === 'production',
-        maxAge: 365 * 24 * 60 * 60 * 1000, // 365 days in milliseconds
+        maxAge: 365 * 24 * 60 * 60 * 1000,
         httpOnly: true,
         sameSite: 'lax'
     },
@@ -94,86 +100,8 @@ app.use(session({
 app.set('view engine', 'ejs');
 app.set('views', viewsDir);
 
-// MongoDB Connection - UPDATED with MongoDB Atlas SRV connection
-const connectDB = async () => {
-    try {
-        // MongoDB Atlas SRV connection string with meryenda_store database
-        const mongoURI = 'mongodb+srv://archie:ldf0Kf6Mk4mfLy9d@cluster0.zxyte8i.mongodb.net/meryenda_store?appName=Cluster0';
-        
-        console.log('🔄 Attempting to connect to MongoDB Atlas...');
-        console.log(`📊 Using database: meryenda_store`);
-        
-        const conn = await mongoose.connect(mongoURI, {
-            serverSelectionTimeoutMS: 5000,
-            socketTimeoutMS: 45000,
-            family: 4
-            // Removed dbName option since it's in the connection string
-        });
-        
-        console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
-        console.log(`📊 Database: ${conn.connection.name}`);
-        
-        await createDefaultAdmin();
-        
-        return conn;
-    } catch (err) {
-        console.error('❌ MongoDB connection error:', err.message);
-        console.log('🔄 Retrying connection in 5 seconds...');
-        setTimeout(connectDB, 5000);
-    }
-};
+// ============== MONGODB SCHEMAS ==============
 
-// Create default admin user - FIXED: Better error handling for duplicate key
-const createDefaultAdmin = async () => {
-    try {
-        // Check if any admin exists
-        const adminExists = await User.findOne({ role: 'admin' });
-        
-        if (!adminExists) {
-            // Check if user with username admin exists (might have different role)
-            const existingAdmin = await User.findOne({ username: 'admin' });
-            
-            if (existingAdmin) {
-                // Update existing user to admin role if needed
-                if (existingAdmin.role !== 'admin') {
-                    existingAdmin.role = 'admin';
-                    existingAdmin.fullName = existingAdmin.fullName || 'System Administrator';
-                    await existingAdmin.save();
-                    console.log('✅ Updated existing user to admin role');
-                } else {
-                    console.log('✅ Admin user already exists');
-                }
-                return;
-            }
-            
-            // Create new admin user
-            const adminUser = new User({
-                username: 'admin',
-                password: 'admin123',
-                role: 'admin',
-                email: 'admin@meryenda.com',
-                fullName: 'System Administrator',
-                isActive: true
-            });
-            
-            await adminUser.save();
-            console.log('✅ Default admin user created (username: admin, password: admin123)');
-        } else {
-            console.log('✅ Admin user already exists');
-        }
-    } catch (error) {
-        // Handle duplicate key error gracefully
-        if (error.code === 11000) {
-            console.log('✅ Admin user already exists (duplicate key)');
-        } else {
-            console.error('Error creating default admin:', error.message);
-        }
-    }
-};
-
-connectDB();
-
-// MongoDB Schemas
 const userSchema = new mongoose.Schema({
     username: { type: String, required: true, unique: true },
     password: { type: String, required: true },
@@ -194,9 +122,9 @@ const userSchema = new mongoose.Schema({
 });
 
 // Hash password before saving
-userSchema.pre('save', async function() {
+userSchema.pre('save', async function () {
     if (!this.isModified('password')) return;
-    
+
     try {
         const salt = await bcrypt.genSalt(12);
         this.password = await bcrypt.hash(this.password, salt);
@@ -206,33 +134,29 @@ userSchema.pre('save', async function() {
 });
 
 // Method to compare password
-userSchema.methods.comparePassword = async function(candidatePassword) {
-    try {
-        return await bcrypt.compare(candidatePassword, this.password);
-    } catch (error) {
-        throw error;
-    }
+userSchema.methods.comparePassword = async function (candidatePassword) {
+    return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Method to generate JWT token - UPDATED to 365 days
-userSchema.methods.generateAuthToken = function() {
+// Method to generate JWT token - 365 days
+userSchema.methods.generateAuthToken = function () {
     return jwt.sign(
-        { 
-            id: this._id, 
-            username: this.username, 
-            role: this.role 
-        }, 
-        JWT_SECRET, 
-        { expiresIn: '365d' } // Changed from '24h' to '365d'
+        {
+            id: this._id,
+            username: this.username,
+            role: this.role
+        },
+        JWT_SECRET,
+        { expiresIn: '365d' }
     );
 };
 
-// Method to generate refresh token - UPDATED to 365 days
-userSchema.methods.generateRefreshToken = function() {
+// Method to generate refresh token - 365 days
+userSchema.methods.generateRefreshToken = function () {
     return jwt.sign(
         { id: this._id },
         JWT_SECRET + 'refresh',
-        { expiresIn: '365d' } // Changed from '7d' to '365d'
+        { expiresIn: '365d' }
     );
 };
 
@@ -256,7 +180,7 @@ const productSchema = new mongoose.Schema({
 });
 
 // Virtual for checking if low stock
-productSchema.virtual('isLowStock').get(function() {
+productSchema.virtual('isLowStock').get(function () {
     return this.stockQuantity <= this.lowStockThreshold;
 });
 
@@ -287,15 +211,15 @@ const orderSchema = new mongoose.Schema({
     customerPhone: String,
     amountPaid: { type: Number, required: true },
     change: { type: Number, required: true },
-    status: { 
-        type: String, 
-        enum: ['pending', 'preparing', 'ready', 'completed', 'cancelled', 'refunded'], 
-        default: 'pending' 
+    status: {
+        type: String,
+        enum: ['pending', 'preparing', 'ready', 'completed', 'cancelled', 'refunded'],
+        default: 'pending'
     },
-    paymentStatus: { 
-        type: String, 
-        enum: ['pending', 'paid', 'refunded', 'failed'], 
-        default: 'pending' 
+    paymentStatus: {
+        type: String,
+        enum: ['pending', 'paid', 'refunded', 'failed'],
+        default: 'pending'
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     completedAt: Date,
@@ -308,26 +232,26 @@ const orderSchema = new mongoose.Schema({
 });
 
 // Generate order number before saving
-orderSchema.pre('save', async function() {
+orderSchema.pre('save', async function () {
     if (!this.orderNumber) {
         const date = new Date();
         const year = date.getFullYear().toString().slice(-2);
         const month = (date.getMonth() + 1).toString().padStart(2, '0');
         const day = date.getDate().toString().padStart(2, '0');
-        
+
         const startOfDay = new Date(date);
         startOfDay.setHours(0, 0, 0, 0);
-        
+
         const endOfDay = new Date(date);
         endOfDay.setHours(23, 59, 59, 999);
-        
+
         const count = await mongoose.model('Order').countDocuments({
             createdAt: {
                 $gte: startOfDay,
                 $lt: endOfDay
             }
         });
-        
+
         this.orderNumber = `ORD-${year}${month}${day}-${(count + 1).toString().padStart(4, '0')}`;
     }
 });
@@ -363,7 +287,117 @@ const Order = mongoose.model('Order', orderSchema);
 const Category = mongoose.model('Category', categorySchema);
 const InventoryLog = mongoose.model('InventoryLog', inventoryLogSchema);
 
-// Authentication Middleware
+// ============== DEFAULT USERS ==============
+
+// Create default admin user
+const createDefaultAdmin = async () => {
+    try {
+        const adminExists = await User.findOne({ role: 'admin' });
+
+        if (!adminExists) {
+            const existingAdmin = await User.findOne({ username: 'admin' });
+
+            if (existingAdmin) {
+                if (existingAdmin.role !== 'admin') {
+                    existingAdmin.role = 'admin';
+                    existingAdmin.fullName = existingAdmin.fullName || 'System Administrator';
+                    await existingAdmin.save();
+                    console.log('✅ Updated existing user to admin role');
+                } else {
+                    console.log('✅ Admin user already exists');
+                }
+                return;
+            }
+
+            const adminUser = new User({
+                username: 'admin',
+                password: 'admin123',
+                role: 'admin',
+                email: 'admin@meryenda.com',
+                fullName: 'System Administrator',
+                isActive: true
+            });
+
+            await adminUser.save();
+            console.log('✅ Default admin user created (username: admin, password: admin123)');
+        } else {
+            console.log('✅ Admin user already exists');
+        }
+    } catch (error) {
+        if (error.code === 11000) {
+            console.log('✅ Admin user already exists (duplicate key)');
+        } else {
+            console.error('Error creating default admin:', error.message);
+        }
+    }
+};
+
+// Create default staff user
+const createDefaultStaff = async () => {
+    try {
+        const staffExists = await User.findOne({ username: 'staff' });
+
+        if (staffExists) {
+            console.log('✅ Staff user already exists');
+            return;
+        }
+
+        const staffUser = new User({
+            username: 'staff',
+            password: 'staff123', // hashed automatically by the pre-save hook
+            role: 'staff',
+            email: 'staff@meryenda.com',
+            fullName: 'Store Staff',
+            isActive: true
+        });
+
+        await staffUser.save();
+        console.log('✅ Default staff user created (username: staff, password: staff123)');
+    } catch (error) {
+        if (error.code === 11000) {
+            console.log('✅ Staff user already exists (duplicate key)');
+        } else {
+            console.error('Error creating default staff:', error.message);
+        }
+    }
+};
+
+// ============== MONGODB CONNECTION ==============
+
+const connectDB = async () => {
+    if (!MONGODB_URI) {
+        console.error('❌ MONGODB_URI is missing. Add it to your .env file:');
+        console.error('   MONGODB_URI=mongodb+srv://archie:Q7My61JMZv0XIWjI@cluster0.zxyte8i.mongodb.net/meryenda_store?appName=Cluster0');
+        process.exit(1);
+    }
+
+    try {
+        console.log('🔄 Attempting to connect to MongoDB Atlas...');
+
+        const conn = await mongoose.connect(MONGODB_URI, {
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+            family: 4
+        });
+
+        console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+        console.log(`📊 Database: ${conn.connection.name}`);
+
+        await createDefaultAdmin();
+        await createDefaultStaff();
+
+        return conn;
+    } catch (err) {
+        console.error('❌ MongoDB connection error:', err.message);
+        console.log('🔄 Retrying connection in 5 seconds...');
+        setTimeout(connectDB, 5000);
+    }
+};
+
+connectDB();
+
+// ============== AUTH MIDDLEWARE ==============
+
 const requireAuth = (req, res, next) => {
     if (!req.session.userId) {
         return res.redirect('/login');
@@ -374,7 +408,7 @@ const requireAuth = (req, res, next) => {
 const requireRole = (roles) => {
     return (req, res, next) => {
         if (!req.session.role || !roles.includes(req.session.role)) {
-            return res.status(403).render('error', { 
+            return res.status(403).render('error', {
                 message: 'Insufficient permissions',
                 error: { status: 403 },
                 title: 'Access Denied',
@@ -390,10 +424,8 @@ const requireRole = (roles) => {
 // Home/Dashboard route - serves staffdashboard.ejs
 app.get('/', requireAuth, async (req, res) => {
     try {
-        // Get user data if needed for future enhancements
         const user = await User.findById(req.session.userId).select('-password -refreshToken').lean();
-        
-        // Your EJS doesn't use any of these variables yet, but we'll pass them for future use
+
         res.render('staffdashboard', {
             title: 'Meryenda Store',
             user: user,
@@ -403,7 +435,6 @@ app.get('/', requireAuth, async (req, res) => {
         });
     } catch (error) {
         console.error('Error loading dashboard:', error);
-        // Even on error, render the dashboard without user data
         res.render('staffdashboard', {
             title: 'Meryenda Store',
             user: null,
@@ -427,73 +458,72 @@ app.get('/login', (req, res) => {
     });
 });
 
-// Login API - UPDATED cookie maxAge to 365 days
+// Login API
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        
+
         if (!username || !password) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Username and password are required' 
+            return res.status(400).json({
+                success: false,
+                error: 'Username and password are required'
             });
         }
-        
+
         const user = await User.findOne({ username, isActive: true });
-        
+
         if (!user) {
-            return res.status(401).json({ 
-                success: false, 
-                error: 'Invalid credentials' 
+            return res.status(401).json({
+                success: false,
+                error: 'Invalid credentials'
             });
         }
-        
+
         const isMatch = await user.comparePassword(password);
-        
+
         if (isMatch) {
             req.session.userId = user._id;
             req.session.username = user.username;
             req.session.role = user.role;
-            
+
             user.lastLogin = Date.now();
-            await user.save();
-            
+
             const token = user.generateAuthToken();
             const refreshToken = user.generateRefreshToken();
-            
+
             user.refreshToken = refreshToken;
             await user.save();
-            
+
             res.cookie('token', token, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
-                maxAge: 365 * 24 * 60 * 60 * 1000 // Updated to 365 days
+                maxAge: 365 * 24 * 60 * 60 * 1000
             });
-            
-            return res.json({ 
-                success: true, 
+
+            return res.json({
+                success: true,
                 message: 'Login successful',
                 token,
                 refreshToken,
-                user: { 
+                user: {
                     id: user._id,
-                    username: user.username, 
+                    username: user.username,
                     role: user.role,
                     email: user.email,
                     fullName: user.fullName
                 }
             });
         }
-        
-        res.status(401).json({ 
-            success: false, 
-            error: 'Invalid credentials' 
+
+        res.status(401).json({
+            success: false,
+            error: 'Invalid credentials'
         });
     } catch (error) {
         console.error('Login error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'An error occurred during login' 
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred during login'
         });
     }
 });
@@ -515,24 +545,24 @@ app.get('/api/products', async (req, res) => {
     try {
         const { category, search } = req.query;
         let query = { isAvailable: true };
-        
+
         if (category && category !== 'all') {
             query.category = category;
         }
-        
+
         if (search) {
             query.name = { $regex: search, $options: 'i' };
         }
-        
+
         const products = await Product.find(query)
             .sort({ category: 1, name: 1 })
             .lean();
-        
+
         const productsWithFlags = products.map(product => ({
             ...product,
             isLowStock: product.stockQuantity <= product.lowStockThreshold
         }));
-        
+
         res.json(productsWithFlags);
     } catch (error) {
         console.error('Error fetching products:', error);
@@ -558,24 +588,24 @@ app.get('/api/orders', requireAuth, async (req, res) => {
     try {
         const { limit = 50, startDate, endDate, status } = req.query;
         let query = {};
-        
+
         if (startDate && endDate) {
             query.createdAt = {
                 $gte: new Date(startDate),
                 $lte: new Date(endDate)
             };
         }
-        
+
         if (status) {
             query.status = status;
         }
-        
+
         const orders = await Order.find(query)
             .sort({ createdAt: -1 })
             .limit(parseInt(limit))
             .populate('createdBy', 'username fullName')
             .lean();
-        
+
         res.json(orders);
     } catch (error) {
         console.error('Error fetching orders:', error);
@@ -591,10 +621,10 @@ app.post('/api/orders', requireAuth, async (req, res) => {
             status: 'pending',
             paymentStatus: req.body.paymentMethod === 'Cash' ? 'paid' : 'pending'
         };
-        
+
         const order = new Order(orderData);
         await order.save();
-        
+
         // Update product stock
         for (const item of order.items) {
             const product = await Product.findById(item.productId);
@@ -602,7 +632,7 @@ app.post('/api/orders', requireAuth, async (req, res) => {
                 const oldStock = product.stockQuantity;
                 product.stockQuantity -= item.quantity;
                 await product.save();
-                
+
                 await InventoryLog.create({
                     productId: item.productId,
                     action: 'sold',
@@ -614,9 +644,9 @@ app.post('/api/orders', requireAuth, async (req, res) => {
                 });
             }
         }
-        
+
         await order.populate('createdBy', 'username fullName');
-        
+
         res.status(201).json(order);
     } catch (error) {
         console.error('Error creating order:', error);
@@ -629,10 +659,10 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
     try {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
-        
+
         const [
             totalOrdersToday,
             totalRevenueToday,
@@ -641,40 +671,46 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
             lowStockProducts,
             recentOrders
         ] = await Promise.all([
-            Order.countDocuments({ 
+            Order.countDocuments({
                 createdAt: { $gte: today, $lt: tomorrow },
                 status: 'completed'
             }),
             Order.aggregate([
-                { $match: { 
-                    createdAt: { $gte: today, $lt: tomorrow },
-                    status: 'completed'
-                }},
+                {
+                    $match: {
+                        createdAt: { $gte: today, $lt: tomorrow },
+                        status: 'completed'
+                    }
+                },
                 { $group: { _id: null, total: { $sum: '$total' } } }
             ]),
             Order.aggregate([
                 { $match: { status: 'completed' } },
                 { $unwind: '$items' },
-                { $group: { 
-                    _id: '$items.productId', 
-                    name: { $first: '$items.name' },
-                    totalSold: { $sum: '$items.quantity' },
-                    revenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } }
-                }},
+                {
+                    $group: {
+                        _id: '$items.productId',
+                        name: { $first: '$items.name' },
+                        totalSold: { $sum: '$items.quantity' },
+                        revenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } }
+                    }
+                },
                 { $sort: { totalSold: -1 } },
                 { $limit: 5 }
             ]),
             Order.aggregate([
                 { $match: { status: 'completed' } },
                 { $unwind: '$items' },
-                { $group: { 
-                    _id: '$items.category',
-                    totalSales: { $sum: { $multiply: ['$items.quantity', '$items.price'] } },
-                    orderCount: { $sum: 1 }
-                }}
+                {
+                    $group: {
+                        _id: '$items.category',
+                        totalSales: { $sum: { $multiply: ['$items.quantity', '$items.price'] } },
+                        orderCount: { $sum: 1 }
+                    }
+                }
             ]),
             Product.find({
-                $expr: { $lte: [ '$stockQuantity', '$lowStockThreshold' ] }
+                $expr: { $lte: ['$stockQuantity', '$lowStockThreshold'] }
             }).select('name stockQuantity lowStockThreshold').limit(10),
             Order.find({ status: 'pending' })
                 .sort({ createdAt: -1 })
@@ -682,7 +718,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                 .populate('createdBy', 'username')
                 .lean()
         ]);
-        
+
         res.json({
             today: {
                 orders: totalOrdersToday,
@@ -708,9 +744,9 @@ app.get('/api/health', (req, res) => {
         2: 'connecting',
         3: 'disconnecting'
     };
-    
-    res.json({ 
-        status: 'OK', 
+
+    res.json({
+        status: 'OK',
         timestamp: new Date(),
         uptime: process.uptime(),
         mongodb: {
@@ -719,17 +755,16 @@ app.get('/api/health', (req, res) => {
             host: mongoose.connection.host || 'not connected',
             name: mongoose.connection.name || 'not connected'
         },
-        bcryptType: bcrypt.default ? 'bcrypt' : 'bcryptjs',
+        bcryptType,
         environment: process.env.NODE_ENV || 'development'
     });
 });
-
 
 // Start server
 app.listen(PORT, () => {
     console.log(`🚀 Server is running on http://localhost:${PORT}`);
     console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🔐 Using ${bcrypt.default ? 'bcrypt' : 'bcryptjs'} for password hashing`);
+    console.log(`🔐 Using ${bcryptType} for password hashing`);
     console.log(`📁 Views directory: ${viewsDir}`);
     console.log(`📁 CSS directory: ${cssDir}`);
     console.log(`📁 JS directory: ${jsDir}`);
