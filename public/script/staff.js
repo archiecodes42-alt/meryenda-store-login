@@ -288,7 +288,7 @@ const menuDatabase = [
     {
         id: 611,
         name: "Siomai - 4 pieces",
-        price: 20,
+        price: 24,
         category: "Snacks",
         image: "/images/siomai.png",
         description: "4 pieces of siomai",
@@ -298,7 +298,7 @@ const menuDatabase = [
     {
         id: 612,
         name: "Siomai - 5 pieces",
-        price: 25,
+        price: 30,
         category: "Snacks",
         image: "/images/siomai.png",
         description: "5 pieces of siomai",
@@ -308,7 +308,7 @@ const menuDatabase = [
     {
         id: 613,
         name: "Siomai - 6 pieces",
-        price: 30,
+        price: 49,
         category: "Snacks",
         image: "/images/siomai.png",
         description: "6 pieces of siomai",
@@ -318,7 +318,7 @@ const menuDatabase = [
     {
         id: 614,
         name: "Siomai - 7 pieces",
-        price: 35,
+        price: 50,
         category: "Snacks",
         image: "/images/siomai.png",
         description: "7 pieces of siomai",
@@ -328,7 +328,7 @@ const menuDatabase = [
     {
         id: 615,
         name: "Siomai - 8 pieces",
-        price: 40,
+        price: 58,
         category: "Snacks",
         image: "/images/siomai.png",
         description: "8 pieces of siomai",
@@ -338,7 +338,7 @@ const menuDatabase = [
     {
         id: 616,
         name: "Siomai - 9 pieces",
-        price: 45,
+        price: 68,
         category: "Snacks",
         image: "/images/siomai.png",
         description: "9 pieces of siomai",
@@ -348,7 +348,7 @@ const menuDatabase = [
     {
         id: 617,
         name: "Siomai - 10 pieces",
-        price: 50,
+        price: 79,
         category: "Snacks",
         image: "/images/siomai.png",
         description: "10 pieces of siomai",
