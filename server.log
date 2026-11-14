@@ -1,4 +1,4 @@
-[dotenv@17.2.3] injecting env (10) from .env -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+[dotenv@17.2.3] injecting env (10) from .env -- tip: ⚙️  override existing env vars with { override: true }
 ✅ Using bcryptjs (pure JS) for compatibility
 🔄 Attempting to connect to MongoDB Atlas...
 🚀 Server is running on http://localhost:3000
@@ -8,7 +8,7 @@
 📁 CSS directory: /data/data/com.termux/files/home/folder/meryenda-store-login/css
 📁 JS directory: /data/data/com.termux/files/home/folder/meryenda-store-login/js
 📁 Images directory: /data/data/com.termux/files/home/folder/meryenda-store-login/images
-✅ MongoDB Connected: ac-itiacbn-shard-00-01.zxyte8i.mongodb.net
+✅ MongoDB Connected: ac-itiacbn-shard-00-02.zxyte8i.mongodb.net
 📊 Database: meryenda_store
 ✅ Admin user already exists
 ✅ Staff user already exists

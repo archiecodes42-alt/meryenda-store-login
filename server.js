@@ -96,6 +96,14 @@ app.use(session({
     name: 'meryenda.sid'
 }));
 
+// Never cache pages/API responses (static assets are unaffected)
+app.use((req, res, next) => {
+    if (!/\.(css|js|png|jpe?g|gif|svg|ico|webp|woff2?)$/i.test(req.path)) {
+        res.set('Cache-Control', 'no-store');
+    }
+    next();
+});
+
 // Set EJS as view engine
 app.set('view engine', 'ejs');
 app.set('views', viewsDir);
@@ -367,7 +375,7 @@ const createDefaultStaff = async () => {
 const connectDB = async () => {
     if (!MONGODB_URI) {
         console.error('❌ MONGODB_URI is missing. Add it to your .env file:');
-        console.error('   MONGODB_URI=mongodb+srv://archie:Q7My61JMZv0XIWjI@cluster0.zxyte8i.mongodb.net/meryenda_store?appName=Cluster0');
+        console.error('   MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster0.zxyte8i.mongodb.net/meryenda_store?appName=Cluster0');
         process.exit(1);
     }
 
@@ -399,10 +407,30 @@ connectDB();
 // ============== AUTH MIDDLEWARE ==============
 
 const requireAuth = (req, res, next) => {
-    if (!req.session.userId) {
-        return res.redirect('/login');
+    // 1) Normal session
+    if (req.session && req.session.userId) return next();
+
+    // 2) Fallback: valid JWT cookie / Bearer token (survives server restarts,
+    //    since sessions are kept in memory and are lost on restart)
+    try {
+        const header = req.headers.authorization || '';
+        const token = req.cookies?.token || (header.startsWith('Bearer ') ? header.slice(7) : null);
+        if (token) {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            req.session.userId = decoded.id;
+            req.session.username = decoded.username;
+            req.session.role = decoded.role;
+            return next();
+        }
+    } catch (e) {
+        // invalid or expired token - fall through
     }
-    next();
+
+    // API calls get JSON, pages get redirected (prevents login <-> dashboard loops)
+    if (req.originalUrl.startsWith('/api/')) {
+        return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    return res.redirect('/login');
 };
 
 const requireRole = (roles) => {
@@ -482,7 +510,7 @@ app.post('/api/login', async (req, res) => {
         const isMatch = await user.comparePassword(password);
 
         if (isMatch) {
-            req.session.userId = user._id;
+            req.session.userId = user._id.toString();
             req.session.username = user.username;
             req.session.role = user.role;
 
@@ -500,18 +528,26 @@ app.post('/api/login', async (req, res) => {
                 maxAge: 365 * 24 * 60 * 60 * 1000
             });
 
-            return res.json({
-                success: true,
-                message: 'Login successful',
-                token,
-                refreshToken,
-                user: {
-                    id: user._id,
-                    username: user.username,
-                    role: user.role,
-                    email: user.email,
-                    fullName: user.fullName
+            // Make sure the session is stored BEFORE the browser redirects
+            return req.session.save((err) => {
+                if (err) {
+                    console.error('Session save error:', err);
+                    return res.status(500).json({ success: false, error: 'Session error' });
                 }
+                res.json({
+                    success: true,
+                    message: 'Login successful',
+                    redirect: '/',
+                    token,
+                    refreshToken,
+                    user: {
+                        id: user._id,
+                        username: user.username,
+                        role: user.role,
+                        email: user.email,
+                        fullName: user.fullName
+                    }
+                });
             });
         }
 
@@ -758,6 +794,11 @@ app.get('/api/health', (req, res) => {
         bcryptType,
         environment: process.env.NODE_ENV || 'development'
     });
+});
+
+// Aliases in case login.ejs / the frontend redirects to a different path
+['/staffdashboard', '/dashboard', '/staff', '/index', '/home'].forEach((p) => {
+    app.get(p, requireAuth, (req, res) => res.redirect('/'));
 });
 
 // Start server
